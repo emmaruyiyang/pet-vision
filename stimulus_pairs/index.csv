@@ -1,0 +1,17 @@
+group,pair,human,dog,sbs,note
+manual,m01_narrow-passage,manual/m01_narrow-passage_human.jpg,manual/m01_narrow-passage_dog.jpg,manual/m01_narrow-passage_sbs.jpg,手动配对的截图
+manual,m02_crosswalk,manual/m02_crosswalk_human.jpg,manual/m02_crosswalk_dog.jpg,manual/m02_crosswalk_sbs.jpg,手动配对的截图
+manual,m03_louvre-bench,manual/m03_louvre-bench_human.jpg,manual/m03_louvre-bench_dog.jpg,manual/m03_louvre-bench_sbs.jpg,手动配对的截图
+manual,m04_benjerry-sign,manual/m04_benjerry-sign_human.jpg,manual/m04_benjerry-sign_dog.jpg,manual/m04_benjerry-sign_sbs.jpg,手动配对的截图
+manual,m05_pumpkin-arch,manual/m05_pumpkin-arch_human.jpg,manual/m05_pumpkin-arch_dog.jpg,manual/m05_pumpkin-arch_sbs.jpg,手动配对的截图
+from_video,v01_t752,from_video/v01_t752_human.jpg,from_video/v01_t752_dog.jpg,from_video/v01_t752_sbs.jpg,从合成视频匹配
+from_video,v02_t763,from_video/v02_t763_human.jpg,from_video/v02_t763_dog.jpg,from_video/v02_t763_sbs.jpg,从合成视频匹配
+from_video,v03_t865,from_video/v03_t865_human.jpg,from_video/v03_t865_dog.jpg,from_video/v03_t865_sbs.jpg,从合成视频匹配
+from_video,v04_t882,from_video/v04_t882_human.jpg,from_video/v04_t882_dog.jpg,from_video/v04_t882_sbs.jpg,从合成视频匹配
+from_video,v05_t960,from_video/v05_t960_human.jpg,from_video/v05_t960_dog.jpg,from_video/v05_t960_sbs.jpg,从合成视频匹配
+from_video,v06_t1104,from_video/v06_t1104_human.jpg,from_video/v06_t1104_dog.jpg,from_video/v06_t1104_sbs.jpg,从合成视频匹配
+from_video,v07_t1697,from_video/v07_t1697_human.jpg,from_video/v07_t1697_dog.jpg,from_video/v07_t1697_sbs.jpg,从合成视频匹配
+from_video,v08_t2007,from_video/v08_t2007_human.jpg,from_video/v08_t2007_dog.jpg,from_video/v08_t2007_sbs.jpg,从合成视频匹配
+from_video,v09_t2012,from_video/v09_t2012_human.jpg,from_video/v09_t2012_dog.jpg,from_video/v09_t2012_sbs.jpg,从合成视频匹配
+from_video,v10_t2080,from_video/v10_t2080_human.jpg,from_video/v10_t2080_dog.jpg,from_video/v10_t2080_sbs.jpg,从合成视频匹配
+from_video,v11_t1816_aframe,from_video/v11_t1816_aframe_human.jpg,from_video/v11_t1816_aframe_dog.jpg,from_video/v11_t1816_aframe_sbs.jpg,从合成视频匹配

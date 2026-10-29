@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "viz",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "viz/serve.py",
+        "8777"
+      ],
+      "port": 8777
+    }
+  ]
+}

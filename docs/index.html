@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pet Vision · motion visualisations</title>
+<style>
+  :root{
+    --bg:#09090b; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+    --text:#e8e8ea; --dim:#75757e; --faint:#4a4a53;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{margin:0;color:var(--text);-webkit-font-smoothing:antialiased;
+       font:400 14px/1.6 -apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:0 40px 90px}
+  @media (max-width:700px){.wrap{padding:0 20px 60px}}
+
+  header{padding:110px 0 0}
+  .eyebrow{font-size:10px;letter-spacing:.24em;text-transform:uppercase;
+           color:var(--faint);margin-bottom:18px}
+  h1{font-size:38px;line-height:1.18;margin:0 0 18px;font-weight:300;letter-spacing:-.015em}
+  h1 b{font-weight:500}
+  .sub{color:var(--dim);font-size:13px;line-height:1.8;max-width:570px}
+  .sub code{color:#9a9aa4;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:3px;
+            font-size:11.5px}
+
+  .list{margin-top:62px;border-top:1px solid var(--line)}
+  a.item{display:grid;grid-template-columns:34px 1fr;gap:22px;text-decoration:none;color:inherit;
+         padding:30px 0 32px;border-bottom:1px solid var(--line);
+         transition:background .18s;position:relative}
+  a.item:hover{background:rgba(255,255,255,.022)}
+  a.item:hover h2 .arrow{opacity:1;transform:translateX(0)}
+  .num{font-size:10px;letter-spacing:.16em;color:var(--faint);padding-top:5px;
+       font-variant-numeric:tabular-nums}
+  h2{font-size:17px;margin:0 0 10px;font-weight:450;letter-spacing:-.005em;
+     display:flex;align-items:baseline;gap:10px}
+  h2 em{font-style:normal;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+        color:var(--faint);font-weight:400}
+  h2 .arrow{margin-left:auto;color:var(--dim);font-size:14px;opacity:0;
+            transform:translateX(-5px);transition:.2s}
+  .item p{margin:0 0 14px;color:var(--dim);font-size:12.5px;line-height:1.85;max-width:630px}
+  .src{font-size:10.5px;color:var(--faint);line-height:1.9}
+  .src code{color:#5c5c66}
+
+  .note{color:var(--faint);font-size:11.5px;line-height:1.9;margin-top:46px}
+  .note code{color:var(--dim);background:rgba(255,255,255,.05);padding:2px 6px;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">SCI 6384 · Towards a New Science of Design</div>
+    <h1>Pet Vision<br><b>Motion visualisations</b></h1>
+    <div class="sub">Two pages that play back in the browser. Everything they draw comes from
+      files that already exist — <code>aoi/</code>, <code>viewer/data/</code> and
+      <code>imu/</code>. No new model, nothing re-segmented.</div>
+  </header>
+
+  <div class="list">
+    <a class="item" href="gaze-by-scene/">
+      <span class="num">01</span>
+      <div>
+        <h2>Gaze by scene <em>Heat map + scanpath</em> <span class="arrow">→</span></h2>
+        <p>All 19 trials, switched by scene. Pick a scene and its three conditions — human eye
+          height, dog eye height, dog height through a dichromat transform — sit side by side.
+          The View control swaps every plate between the aggregate heat map, which shows where
+          the time went, and the live scanpath, which keeps the order it went in. Under each:
+          the dwell stripe, and each class's dwell share with how far it sits from that class's
+          share of the image.</p>
+        <div class="src">From <code>viewer/data/*.gaze_px.csv</code> + <code>eyetracking_n1/P01_trials.csv</code>
+          + <code>aoi/gaze_aoi_shares.csv</code> · n = 1 (P01)</div>
+      </div>
+    </a>
+
+    <a class="item" href="live-aoi/">
+      <span class="num">02</span>
+      <div>
+        <h2>Human / dog live AOI <em>Walk</em> <span class="arrow">→</span></h2>
+        <p>Five minutes of the walk, 05:00 to 10:00, with both viewpoints playing side by side
+          and every readout advancing with the picture: composition shares, openness, obstacle
+          cover, divergence between the two views, IMU motion and turn rate. The timeline is
+          clickable.</p>
+        <div class="src">From <code>aoi/aoi_shares.csv</code> · <code>aoi/depth_metrics.csv</code>
+          · <code>aoi/divergence_tv.csv</code> · <code>imu/imu.csv</code> · <code>imu/stops.csv</code></div>
+      </div>
+    </a>
+  </div>
+
+  <div class="note">
+    These two pages load their data with <code>fetch</code>, which the file:// origin blocks, so
+    from a folder they need <code>python3 docs/serve.py</code> and then localhost:8777 — and that
+    server, not <code>python3 -m http.server</code>, because the latter ignores byte ranges and
+    the video will not seek.<br><br>
+    To hand either one to someone without any of that, build the double-clickable copies:
+    <code>python3 scripts/bundle_viz_html.py</code> writes them to <code>docs/standalone-build/</code>.
+  </div>
+</div>
+</body>
+</html>

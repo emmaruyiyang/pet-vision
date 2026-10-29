@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pupil 录制查看器</title>
+<style>
+  /* 左边会话列表，右边播放器 + 时间轴；窄屏堆成一列。 */
+  :root {
+    --bg: #14161a; --panel: #1c2026; --line: #2d333d; --line2: #3a424e;
+    --fg: #e8eaed; --muted: #9aa3af; --dim: #6b7482;
+    --gaze: #e08a4e; --fix: #6ba3dd; --blink: #a06cc0; --off: #e06c6c;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "Helvetica Neue", Helvetica, Arial, "PingFang SC", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font-family: var(--sans); }
+  body { display: flex; flex-direction: column; }
+  header { padding: 14px max(16px, env(safe-area-inset-left,0px)); border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .note { font-size: 12px; color: var(--dim); }
+  main { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+  main.marking { grid-template-columns: 260px 1fr 300px; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } #list { max-height: 180px; } }
+
+  #mark { border-left: 1px solid var(--line); display: none; flex-direction: column;
+          min-height: 0; overflow: hidden; background: var(--bg); position: relative; }
+  main.marking #mark { display: flex; }
+  /*  Below the three-column width the panel would be pushed into a grid row
+      the page cannot scroll to, so it becomes a drawer over the video instead
+      -- a panel you cannot reach is the same as no panel.  */
+  @media (max-width: 1100px) {
+    main.marking { grid-template-columns: 260px 1fr; }
+    main.marking #mark { position: fixed; top: 0; right: 0; bottom: 0; width: min(340px, 86vw);
+                         z-index: 40; box-shadow: -14px 0 34px rgba(0,0,0,.55); }
+  }
+  @media (max-width: 820px) { main.marking { grid-template-columns: 1fr; } }
+  #mark h2 { font-size: 13px; margin: 0; padding: 12px 14px 10px; font-weight: 600;
+             border-bottom: 1px solid var(--line); }
+  #mark h2 small { display: block; font-weight: 400; color: var(--dim); margin-top: 4px;
+                   font-size: 11px; line-height: 1.5; }
+  #trials { overflow: auto; flex: 1; }
+  .tr { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center;
+        padding: 7px 14px; border-bottom: 1px solid #23282f; font-size: 12px; }
+  .tr.next { background: #2a2016; box-shadow: inset 2px 0 0 var(--gaze); }
+  .tr.set { color: var(--fg); }
+  .tr:not(.set) .slug { color: var(--dim); }
+  .tr .n { font: 11px var(--mono); color: var(--dim); }
+  .tr .slug { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tr .cond { font-size: 10px; color: var(--dim); }
+  .tr .t { font: 11.5px var(--mono); color: var(--fix); cursor: pointer;
+           font-variant-numeric: tabular-nums; }
+  .tr .t.none { color: #4b545f; cursor: default; }
+  #markfoot { border-top: 1px solid var(--line); padding: 11px 14px; display: flex;
+              flex-direction: column; gap: 9px; }
+  #markfoot .stat { font-size: 11.5px; }
+  #saved { font-size: 11.5px; color: var(--fix); min-height: 15px; }
+
+  #list { border-right: 1px solid var(--line); overflow: auto; min-width: 0; }
+  .sess { display: block; width: 100%; text-align: left; background: none; border: 0;
+          border-bottom: 1px solid var(--line); padding: 11px 14px; cursor: pointer; color: var(--fg); }
+  .sess:hover { background: #21262e; }
+  .sess[aria-current="true"] { background: #232b35; box-shadow: inset 2px 0 0 var(--fix); }
+  .sess .id { display: block; font: 12.5px var(--mono); }
+  .sess .meta { display: block; font-size: 11px; color: var(--dim); margin-top: 4px;
+                font-variant-numeric: tabular-nums; }
+  .sess .star { color: var(--gaze); }
+
+  #stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #video-wrap { position: relative; flex: 1; min-height: 0; background: #000;
+                display: grid; place-items: center; }
+  video, #stim { max-width: 100%; max-height: 100%; display: block; }
+  #stim { position: absolute; inset: 0; margin: auto; }
+  #stimnote { position: absolute; left: 10px; bottom: 8px; font: 11px var(--mono);
+              color: var(--muted); background: rgba(0,0,0,.45); padding: 3px 7px;
+              border-radius: 4px; pointer-events: none; }
+  #overlay { position: absolute; pointer-events: none; }
+
+  #controls { padding: 10px max(16px, env(safe-area-inset-left,0px));
+              border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: 500 12.5px var(--sans); color: var(--fg); background: #2a313a;
+           border: 1px solid var(--line2); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { background: #343d48; }
+  button.on { background: var(--fix); border-color: var(--fix); color: #0d1218; }
+  #track { position: relative; height: 34px; background: #11141a; border: 1px solid var(--line);
+           border-radius: 5px; overflow: hidden; cursor: pointer; }
+  #track canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+  .stat { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stat b { color: var(--fg); }
+  .key { display: inline-block; font: 11px var(--mono); border: 1px solid var(--line2);
+         border-radius: 4px; padding: 1px 5px; color: var(--dim); }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--dim); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+  #empty { padding: 40px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pupil 录制查看器</h1>
+  <span class="note">注视点是场景相机像素坐标，不是屏幕坐标——这批录制没有表面标记，所以切不了试次。</span>
+</header>
+
+<main>
+  <nav id="list" aria-label="录制列表"></nav>
+  <section id="stage">
+    <div id="video-wrap">
+      <video id="video" playsinline preload="metadata"></video>
+      <img id="stim" alt="" hidden>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="controls">
+      <div class="row">
+        <button id="play">播放</button>
+        <button id="back">&minus;5s</button>
+        <button id="fwd">+5s</button>
+        <button id="rate">1&times;</button>
+        <button id="trail" class="on">轨迹</button>
+        <button id="fixdot" class="on">注视</button>
+        <button id="stimmode">刺激原图</button>
+        <button id="markmode">标试次</button>
+        <span class="stat" id="clock">0:00 / 0:00</span>
+      </div>
+      <div id="track"><canvas id="trackcv"></canvas><div id="head"></div></div>
+      <div class="legend">
+        <span><i style="background:var(--gaze)"></i>注视点</span>
+        <span><i style="background:var(--fix)"></i>fixation</span>
+        <span><i style="background:var(--blink)"></i>眨眼</span>
+        <span><i style="background:var(--off)"></i>没戴上</span>
+        <span><span class="key">空格</span> 播放/暂停 &nbsp; <span class="key">&larr;</span><span class="key">&rarr;</span> 跳 5 秒</span>
+      </div>
+      <div class="stat" id="info"></div>
+    </div>
+  </section>
+
+  <aside id="mark">
+    <button id="closemark" title="收起" style="position:absolute;right:10px;top:9px;
+            padding:3px 9px;font-size:12px;z-index:2">×</button>
+    <h2>标试次边界 <span id="marksess" style="font:11px var(--mono);color:var(--gaze)"></span>
+      <small>顺序来自 <code>eyetracking_n1/trial_lists.csv</code>。看到换图时按
+        <span class="key">M</span>，它会把当前时间记成下一张图的起点。
+        时间轴上的黄色竖线是亮度跳变的候选位置，只是提示。</small>
+    </h2>
+    <div id="trials"></div>
+    <div id="markfoot">
+      <div class="row">
+        <button id="undo">撤销上一个</button>
+        <button id="clearall">全清</button>
+      </div>
+      <div class="row">
+        <button id="save" class="on">保存 CSV</button>
+        <span class="stat" id="markstat"></span>
+      </div>
+      <div id="saved"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $("video"), cv = $("overlay"), g = cv.getContext("2d");
+  var tcv = $("trackcv"), tg = tcv.getContext("2d");
+  var S = null;          // current session data
+  var TRACE = null;      // screen brightness / change hint layer, may be absent
+  var TRIALS = [];       // the stimulus order, from trial_lists.csv
+  var onsets = [];       // onsets[i] = seconds, or null; parallel to TRIALS
+  var showTrail = true, showFix = true, rate = 1;
+  var stimMode = false;      // draw on the stimulus instead of the scene video
+  var PX = null;             // gaze in stimulus pixels, from screen_homography.py
+  var TIMES = [];            // the marked trial table: which image, when
+  var stimNow = null;
+
+  /* ---------- session list ---------- */
+  fetch("data/index.json").then(function (r) { return r.json(); }).then(function (rows) {
+    if (!rows.length) { return fail("data/ 里没有导出结果。先跑 python3 viewer/export_data.py"); }
+    rows.sort(function (a, b) { return b.duration - a.duration; });
+    rows.forEach(function (r, i) {
+      var b = document.createElement("button");
+      b.className = "sess";
+      var star = r.duration > 400 ? '<span class="star">★ </span>' : "";
+      b.innerHTML = star + '<span class="id">' + r.id + "</span>" +
+        '<span class="meta">' + fmt(r.duration) + " &nbsp;&middot;&nbsp; " +
+        r.fixations + " fixations &nbsp;&middot;&nbsp; " + r.actual_hz + " Hz</span>";
+      b.addEventListener("click", function () {
+        [].forEach.call(document.querySelectorAll(".sess"), function (el) {
+          el.setAttribute("aria-current", "false");
+        });
+        b.setAttribute("aria-current", "true");
+        load(r.id);
+      });
+      $("list").appendChild(b);
+      if (i === 0) b.click();
+    });
+  }).catch(function () { fail("读不到 data/index.json。先跑 python3 viewer/export_data.py"); });
+
+  function fail(msg) {
+    $("video-wrap").innerHTML = '<div id="empty">' + msg + "</div>";
+  }
+
+  function load(id) {
+    TRACE = null;
+    onsets = TRIALS.map(function () { return null; });
+    renderTrials();
+    //  bring back a table already saved for THIS recording; without this the
+    //  session switch races the restore and wipes it
+    if (TRIALS.length) setTimeout(restore, 0);
+    loadStimData(id);
+    //  the hint layer is optional: a session without one still marks fine,
+    //  the timeline just has no candidates drawn on it
+    fetch("data/" + id + ".trace.json")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (t) { TRACE = t; if (S) drawTrack(); })
+      .catch(function () { TRACE = null; });
+    fetch("data/" + id + ".json").then(function (r) { return r.json(); }).then(function (d) {
+      S = d;
+      S.gazeT = d.gaze.map(function (p) { return p[0]; });
+      video.src = d.video;
+      video.load();
+      var ms = $("marksess"); if (ms) ms.textContent = d.id;
+      $("info").innerHTML =
+        "标称 <b>" + d.nominal_hz + " Hz</b>，实测 <b>" + d.actual_hz + " Hz</b>" +
+        " &nbsp;·&nbsp; " + d.fixations.length + " 个 fixation，中位时长 <b>" +
+        median(d.fixations.map(function (f) { return f.ms; })) + " ms</b>" +
+        " &nbsp;·&nbsp; " + d.blinks.length + " 次眨眼" +
+        (d.events.length > 2 ? " &nbsp;·&nbsp; " + d.events.length + " 个事件标记"
+                             : " &nbsp;·&nbsp; <b>只有 begin/end，没有试次标记</b>");
+      drawTrack();
+    });
+  }
+
+  function median(a) {
+    if (!a.length) return 0;
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    return s[Math.floor(s.length / 2)];
+  }
+  function fmt(s) {
+    var m = Math.floor(s / 60);
+    return m + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  }
+
+  /* ---------- overlay ---------- */
+  function fit() {
+    if (!video.videoWidth) return null;
+    var box = video.getBoundingClientRect();
+    var wrap = $("video-wrap").getBoundingClientRect();
+    cv.width = Math.round(box.width);
+    cv.height = Math.round(box.height);
+    cv.style.left = (box.left - wrap.left) + "px";
+    cv.style.top = (box.top - wrap.top) + "px";
+    cv.style.width = box.width + "px";
+    cv.style.height = box.height + "px";
+    return { sx: box.width / S.width, sy: box.height / S.height };
+  }
+
+  function nearest(t) {
+    var a = S.gazeT, lo = 0, hi = a.length - 1;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (a[mid] < t) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+
+  function fitTo(el, natW, natH) {
+    var box = el.getBoundingClientRect();
+    var wrap = $("video-wrap").getBoundingClientRect();
+    cv.width = Math.round(box.width);
+    cv.height = Math.round(box.height);
+    cv.style.left = (box.left - wrap.left) + "px";
+    cv.style.top = (box.top - wrap.top) + "px";
+    cv.style.width = box.width + "px";
+    cv.style.height = box.height + "px";
+    return { sx: box.width / natW, sy: box.height / natH };
+  }
+
+  function frameStim(t) {
+    //  The scene video keeps running and keeps the clock; it is just not what
+    //  is shown. The picture is the stimulus as it was authored, so a fixation
+    //  lands on the thing the hypothesis is about rather than on a photograph
+    //  of a monitor.
+    var tr = trialAt(t);
+    var img = $("stim");
+    if (!tr) {
+      img.hidden = true;
+      g.clearRect(0, 0, cv.width, cv.height);
+      note("这一刻不在任何试次里");
+      return;
+    }
+    if (stimNow !== tr.file) {
+      stimNow = tr.file;
+      img.onload = function () { if (stimMode) frameStim(video.currentTime); };
+      img.src = "../eyetracking_n1/" + tr.file;
+    }
+    img.hidden = false;
+    if (!img.naturalWidth) return;
+    var sc = fitTo(img, img.naturalWidth, img.naturalHeight);
+    g.clearRect(0, 0, cv.width, cv.height);
+    if (!PX) { note(tr.slug + " · " + tr.cond + " · 还没算注视映射"); return; }
+
+    var lo = 0, hi = PX.length - 1;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (PX[mid][0] < t) lo = mid + 1; else hi = mid; }
+    if (showTrail) {
+      var i0 = Math.max(0, lo - 60);
+      g.lineWidth = 1.4;
+      for (var i = i0 + 1; i <= lo; i++) {
+        if (PX[i][0] < tr.a || PX[i][0] > tr.b) continue;
+        g.strokeStyle = "rgba(224,138,78," + (0.1 + 0.6 * (i - i0) / (lo - i0 + 1)) + ")";
+        g.beginPath();
+        g.moveTo(PX[i - 1][1] * sc.sx, PX[i - 1][2] * sc.sy);
+        g.lineTo(PX[i][1] * sc.sx, PX[i][2] * sc.sy);
+        g.stroke();
+      }
+    }
+    var p = PX[lo];
+    if (p && Math.abs(p[0] - t) < 0.25) {
+      g.fillStyle = "rgba(224,138,78,.95)";
+      g.beginPath(); g.arc(p[1] * sc.sx, p[2] * sc.sy, 7, 0, 6.2832); g.fill();
+      g.strokeStyle = "rgba(255,255,255,.8)"; g.lineWidth = 1.2; g.stroke();
+    } else {
+      note(tr.slug + " · " + tr.cond + " · 此刻注视不在屏幕上");
+      return;
+    }
+    note(tr.slug + " · " + tr.cond + " · " + Math.round(t - tr.a) + " / "
+         + Math.round(tr.b - tr.a) + " s");
+  }
+
+  function note(txt) {
+    var el = $("stimnote");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "stimnote";
+      $("video-wrap").appendChild(el);
+    }
+    el.textContent = txt;
+    el.hidden = false;
+  }
+
+  function frame() {
+    requestAnimationFrame(frame);
+    if (!S || !video.videoWidth) return;
+    if (stimMode) {
+      var ts = video.currentTime;
+      frameStim(ts);
+      $("clock").textContent = fmt(ts) + " / " + fmt(S.duration);
+      $("head").style.left = (100 * ts / S.duration) + "%";
+      return;
+    }
+    var sc = fit();
+    if (!sc) return;
+    var t = video.currentTime;
+    g.clearRect(0, 0, cv.width, cv.height);
+
+    if (showTrail) {
+      var i1 = nearest(t), i0 = Math.max(0, i1 - 40);
+      g.lineWidth = 1.4;
+      for (var i = i0 + 1; i <= i1; i++) {
+        var p = S.gaze[i - 1], q = S.gaze[i];
+        g.strokeStyle = "rgba(224,138,78," + (0.1 + 0.55 * (i - i0) / (i1 - i0 + 1)) + ")";
+        g.beginPath();
+        g.moveTo(p[1] * sc.sx, p[2] * sc.sy);
+        g.lineTo(q[1] * sc.sx, q[2] * sc.sy);
+        g.stroke();
+      }
+    }
+
+    var f = showFix && S.fixations.find(function (x) { return t >= x.t0 && t <= x.t1; });
+    if (f) {
+      g.strokeStyle = "#6ba3dd";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(f.x * sc.sx, f.y * sc.sy, 26, 0, 6.2832);
+      g.stroke();
+      g.fillStyle = "#6ba3dd";
+      g.font = "12px ui-monospace, Menlo, monospace";
+      g.fillText(f.ms + " ms", f.x * sc.sx + 32, f.y * sc.sy + 4);
+    }
+
+    var k = nearest(t), pt = S.gaze[k];
+    if (pt && Math.abs(pt[0] - t) < 0.2) {
+      g.fillStyle = "rgba(224,138,78,.9)";
+      g.beginPath();
+      g.arc(pt[1] * sc.sx, pt[2] * sc.sy, 6, 0, 6.2832);
+      g.fill();
+    }
+
+    var blinking = S.blinks.some(function (b) { return t >= b[0] && t <= b[1]; });
+    if (blinking) {
+      g.strokeStyle = "rgba(160,108,192,.9)";
+      g.lineWidth = 4;
+      g.strokeRect(2, 2, cv.width - 4, cv.height - 4);
+    }
+
+    $("clock").textContent = fmt(t) + " / " + fmt(S.duration);
+    $("head").style.left = (100 * t / S.duration) + "%";
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- timeline ---------- */
+  function drawTrack() {
+    var r = $("track").getBoundingClientRect();
+    tcv.width = Math.round(r.width); tcv.height = Math.round(r.height);
+    tg.clearRect(0, 0, tcv.width, tcv.height);
+    var X = function (t) { return t / S.duration * tcv.width; };
+
+    S.not_worn.forEach(function (w) {
+      tg.fillStyle = "rgba(224,108,108,.35)";
+      tg.fillRect(X(w[0]), 0, Math.max(1, X(w[1]) - X(w[0])), tcv.height);
+    });
+    tg.fillStyle = "rgba(107,163,221,.55)";
+    S.fixations.forEach(function (f) {
+      var h = Math.min(tcv.height - 8, 4 + f.ms / 40);
+      tg.fillRect(X(f.t0), tcv.height - h, Math.max(1, X(f.t1) - X(f.t0)), h);
+    });
+    tg.fillStyle = "rgba(160,108,192,.9)";
+    S.blinks.forEach(function (b) { tg.fillRect(X(b[0]), 0, 2, 7); });
+    tg.fillStyle = "rgba(232,234,237,.8)";
+    S.events.forEach(function (e) { tg.fillRect(X(e.t), 0, 1, tcv.height); });
+
+    if (TRACE) {
+      //  screen brightness as a thin line across the top: a stimulus switch
+      //  steps it, head motion does not
+      var sc = TRACE.screen, lo = Math.min.apply(null, sc), hi = Math.max.apply(null, sc);
+      tg.strokeStyle = "rgba(154,163,175,.55)";
+      tg.lineWidth = 1;
+      tg.beginPath();
+      sc.forEach(function (v, i) {
+        var x = X(i / TRACE.hz), y = 2 + 12 * (1 - (v - lo) / Math.max(1, hi - lo));
+        i ? tg.lineTo(x, y) : tg.moveTo(x, y);
+      });
+      tg.stroke();
+      tg.fillStyle = "rgba(224,184,78,.75)";
+      TRACE.candidates.forEach(function (t) { tg.fillRect(X(t) - 0.5, 0, 1, tcv.height); });
+    }
+
+    tg.fillStyle = "#e8eaed";
+    onsets.forEach(function (t) {
+      if (t === null) return;
+      tg.fillRect(X(t) - 1, 0, 2, tcv.height);
+    });
+  }
+  window.addEventListener("resize", function () { if (S) drawTrack(); });
+
+  $("track").addEventListener("click", function (e) {
+    if (!S) return;
+    var r = this.getBoundingClientRect();
+    video.currentTime = (e.clientX - r.left) / r.width * S.duration;
+  });
+
+  /* ---------- controls ---------- */
+  $("play").addEventListener("click", function () {
+    if (video.paused) { video.play(); this.textContent = "暂停"; }
+    else { video.pause(); this.textContent = "播放"; }
+  });
+  video.addEventListener("ended", function () { $("play").textContent = "播放"; });
+  $("back").addEventListener("click", function () { video.currentTime -= 5; });
+  $("fwd").addEventListener("click", function () { video.currentTime += 5; });
+  $("rate").addEventListener("click", function () {
+    rate = rate === 1 ? 0.25 : rate === 0.25 ? 2 : 1;
+    video.playbackRate = rate;
+    this.textContent = rate + "×";
+  });
+  $("trail").addEventListener("click", function () {
+    showTrail = !showTrail; this.classList.toggle("on", showTrail);
+  });
+  $("fixdot").addEventListener("click", function () {
+    showFix = !showFix; this.classList.toggle("on", showFix);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space") { e.preventDefault(); $("play").click(); }
+    if (e.code === "ArrowLeft") { e.preventDefault(); video.currentTime -= 5; }
+    if (e.code === "ArrowRight") { e.preventDefault(); video.currentTime += 5; }
+    if (e.key === "m" || e.key === "M") { e.preventDefault(); markHere(); }
+  });
+
+  /* ---------- trial marking ---------- */
+  //  The order is known (trial_lists.csv), only the TIMES are missing, so
+  //  marking is one key per switch rather than any kind of identification.
+  fetch("../eyetracking_n1/trial_lists.csv")
+    .then(function (r) { return r.ok ? r.text() : ""; })
+    .then(function (txt) {
+      if (!txt) return;
+      var lines = txt.trim().split("\n");
+      var head = lines[0].split(",");
+      var col = {};
+      head.forEach(function (h, i) { col[h.trim()] = i; });
+      TRIALS = lines.slice(1).map(function (ln) {
+        var c = ln.split(",");
+        return {
+          trial: c[col.trial], scene: c[col.scene], slug: c[col.slug],
+          condition: c[col.condition], file: c[col.file],
+          grey: parseFloat(c[col.mean_grey]),
+        };
+      });
+      //  trial_lists.csv holds the 18 counterbalanced trials. The X files in
+      //  P01/ were shown too but are not part of that design, so they are
+      //  picked up from the folder and appended in filename order.
+      return fetch("../eyetracking_n1/P01/").then(function (r) {
+        return r.ok ? r.text() : "";
+      }).then(function (listing) {
+        var seen = {};
+        (listing.match(/X\d+_[^"'<>]+\.jpg/g) || []).forEach(function (f) {
+          f = decodeURIComponent(f);
+          if (seen[f]) return;
+          seen[f] = 1;
+          TRIALS.push({
+            trial: "X" + (Object.keys(seen).length), scene: "X",
+            slug: f.replace(/^X\d+_/, "").replace(/\.jpg$/, ""),
+            condition: /dichromat/.test(f) ? "dog_dichromat" : "dog",
+            file: "P01/" + f, grey: "",
+          });
+        });
+        //  one last mark closes the final trial; without it the last one would
+        //  silently run to the end of the recording
+        TRIALS.push({ trial: "END", scene: "", slug: "（最后一张消失）",
+                      condition: "不是试次，只用来结束上一条", file: "", grey: "" });
+        onsets = TRIALS.map(function () { return null; });
+        return restore();
+      });
+    })
+    .catch(function () { /* marking stays unavailable; the viewer still works */ });
+
+  function restore() {
+    //  A second pass must not destroy the first: if a table was already saved,
+    //  its times come back into the panel.
+    return fetch("../eyetracking_n1/P01_trials.csv")
+      .then(function (r) { return r.ok ? r.text() : ""; })
+      .then(function (txt) {
+        if (txt) {
+          var head = txt.trim().split("\n")[0].split(",");
+          var k = head.indexOf("session");
+          var lines = txt.trim().split("\n").slice(1);
+          var by = {};
+          lines.forEach(function (ln) {
+            var c = ln.split(",");
+            if (k === 0 && S && c[0] !== S.id) return;   // another recording
+            var o = k === 0 ? 1 : 0;
+            by[c[o]] = parseFloat(c[o + 5]);
+            if (c[o + 6]) by["__end"] = parseFloat(c[o + 6]);
+          });
+          TRIALS.forEach(function (tr, i) {
+            if (by[tr.trial] !== undefined) onsets[i] = by[tr.trial];
+          });
+          //  The END row is deliberately NOT restored. The offset in a saved
+          //  table is only a real mark when something was marked after it;
+          //  otherwise it is the default "ran to the end of the recording",
+          //  and restoring that would present a guess as a decision.
+        }
+        renderTrials();
+      })
+      .catch(function () { renderTrials(); });
+  }
+
+  function loadStimData(id) {
+    PX = null; TIMES = []; stimNow = null;
+    //  the marked table says which image was on screen when; gaze_px says where
+    //  on that image the eye was. The stimulus view needs both, and without
+    //  either it simply stays unavailable.
+    fetch("../eyetracking_n1/P01_trials.csv")
+      .then(function (r) { return r.ok ? r.text() : ""; })
+      .then(function (txt) {
+        if (!txt) return;
+        var lines = txt.trim().split(/\r?\n/);
+        var h = lines[0].split(",");
+        var ci = function (n) { return h.indexOf(n); };
+        lines.slice(1).forEach(function (ln) {
+          var c = ln.split(",");
+          if (ci("session") >= 0 && c[ci("session")] !== id) return;
+          TIMES.push({ file: c[ci("file")], slug: c[ci("slug")],
+                       cond: c[ci("condition")],
+                       a: parseFloat(c[ci("onset_s")]),
+                       b: parseFloat(c[ci("offset_s")]) });
+        });
+      });
+    fetch("data/" + id + ".gaze_px.csv")
+      .then(function (r) { return r.ok ? r.text() : ""; })
+      .then(function (txt) {
+        if (!txt) return;
+        var out = [];
+        txt.split(/\r?\n/).slice(1).forEach(function (ln) {
+          if (!ln) return;
+          var c = ln.split(",");
+          if (c[5] !== "1") return;
+          out.push([parseFloat(c[0]), parseFloat(c[3]), parseFloat(c[4])]);
+        });
+        PX = out;
+      });
+  }
+
+  function trialAt(t) {
+    for (var i = 0; i < TIMES.length; i++) {
+      if (t >= TIMES[i].a && t <= TIMES[i].b) return TIMES[i];
+    }
+    return null;
+  }
+
+  function renderTrials() {
+    var box = $("trials");
+    if (!TRIALS.length) {
+      box.innerHTML = '<div style="padding:14px;font-size:12px;color:var(--dim)">'
+        + "读不到 eyetracking_n1/trial_lists.csv</div>";
+      return;
+    }
+    var nextIdx = onsets.indexOf(null);
+    box.innerHTML = "";
+    TRIALS.forEach(function (tr, i) {
+      var el = document.createElement("div");
+      el.className = "tr" + (onsets[i] !== null ? " set" : "") + (i === nextIdx ? " next" : "");
+      var t = onsets[i];
+      el.innerHTML =
+        '<span class="n">' + String(i + 1).padStart(2, "0") + "</span>" +
+        '<span class="slug">' + tr.slug + '<br><span class="cond">' + tr.condition +
+        " &middot; grey " + tr.grey + "</span></span>" +
+        '<span class="t' + (t === null ? " none" : "") + '">' +
+        (t === null ? "—" : fmt(t)) + "</span>";
+      if (t !== null) {
+        el.querySelector(".t").addEventListener("click", function () {
+          video.currentTime = t;
+        });
+      }
+      box.appendChild(el);
+    });
+    var done = onsets.filter(function (t) { return t !== null; }).length;
+    $("markstat").textContent = done + " / " + TRIALS.length;
+    if (done > 1) {
+      var ts = onsets.filter(function (t) { return t !== null; });
+      var gaps = ts.slice(1).map(function (t, i) { return t - ts[i]; });
+      gaps.sort(function (a, b) { return a - b; });
+      $("markstat").textContent += "  中位间隔 " + gaps[gaps.length >> 1].toFixed(1) + " s";
+    }
+    if (S) drawTrack();
+  }
+
+  function markHere() {
+    if (!S || !TRIALS.length) return;
+    var i = onsets.indexOf(null);
+    if (i === -1) return;
+    onsets[i] = Math.round(video.currentTime * 100) / 100;
+    renderTrials();
+  }
+
+  $("closemark").addEventListener("click", function () {
+    document.querySelector("main").classList.remove("marking");
+    $("markmode").classList.remove("on");
+  });
+  $("stimmode").addEventListener("click", function () {
+    stimMode = !stimMode;
+    this.classList.toggle("on", stimMode);
+    video.style.visibility = stimMode ? "hidden" : "visible";
+    $("stim").hidden = !stimMode;
+    var n = $("stimnote"); if (n) n.hidden = !stimMode;
+    if (!stimMode) { stimNow = null; g.clearRect(0, 0, cv.width, cv.height); }
+    //  draw at once instead of waiting for the animation frame: the loop is
+    //  throttled while the pane is in the background, and a paused video emits
+    //  no frames at all, so the toggle would otherwise look like it did nothing
+    else if (S && video.videoWidth) frameStim(video.currentTime);
+  });
+  $("markmode").addEventListener("click", function () {
+    var on = document.querySelector("main").classList.toggle("marking");
+    this.classList.toggle("on", on);
+    if (S) setTimeout(drawTrack, 0);
+  });
+  $("undo").addEventListener("click", function () {
+    var i = onsets.indexOf(null);
+    i = i === -1 ? onsets.length - 1 : i - 1;
+    if (i >= 0) { onsets[i] = null; renderTrials(); }
+  });
+  $("clearall").addEventListener("click", function () {
+    onsets = TRIALS.map(function () { return null; });
+    $("saved").textContent = "";
+    renderTrials();
+  });
+
+  $("save").addEventListener("click", function () {
+    if (!S || !TRIALS.length) return;
+    //  The session id travels with the table. Without it a table of times is
+    //  just numbers, and nothing stops them being read against the wrong
+    //  recording -- which is exactly what happened the first time.
+    var rows = ["session,trial,scene,slug,condition,file,onset_s,offset_s,duration_s"];
+    TRIALS.forEach(function (tr, i) {
+      var a = onsets[i];
+      if (a === null || tr.trial === "END") return;
+      //  a trial ends where the next mark is; without one it runs to the end
+      //  of the recording, which is almost never what was meant
+      var b = null;
+      for (var j = i + 1; j < onsets.length; j++) {
+        if (onsets[j] !== null) { b = onsets[j]; break; }
+      }
+      if (b === null) b = S.duration;
+      rows.push([S.id, tr.trial, tr.scene, tr.slug, tr.condition, tr.file,
+                 a.toFixed(2), b.toFixed(2), (b - a).toFixed(2)].join(","));
+    });
+    if (rows.length === 1) { $("saved").textContent = "还没标任何一个。"; return; }
+    fetch("save-trials", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: rows.join("\n"),
+    }).then(function (r) { return r.text(); }).then(function (msg) {
+      $("saved").textContent = msg;
+    }).catch(function () {
+      $("saved").textContent = "服务器没接住。是不是用的不是 viewer/serve.py？";
+    });
+  });
+})();
+</script>
+</body>
+</html>

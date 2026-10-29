@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>摄像头眼动可行性测试</title>
+<style>
+  /* 一列，三段：设置 → 校准/验证 → 试次。深色，因为刺激是照片。 */
+  :root {
+    --bg: #14161a; --panel: #1c2026; --line: #2d333d;
+    --fg: #e8eaed; --muted: #9aa3af;
+    --human: #6ba3dd; --dog: #e08a4e; --ok: #6cc08a; --bad: #e06c6c;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "Helvetica Neue", Helvetica, Arial, "PingFang SC", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); }
+  body { padding: 24px max(16px, env(safe-area-inset-left,0px)) 64px; }
+  .wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  h1 { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
+  h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; letter-spacing: .02em; }
+  p, li { line-height: 1.6; color: var(--muted); font-size: 13.5px; margin: 0 0 10px; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .step[data-done="1"] { border-color: #39543f; }
+  .num { font: 600 11px var(--mono); color: var(--muted); letter-spacing: .08em; display: block; margin-bottom: 8px; }
+  button { font: 500 13.5px var(--sans); color: var(--fg); background: #2a313a;
+           border: 1px solid var(--line); border-radius: 7px; padding: 9px 16px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #343d48; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--human); border-color: var(--human); color: #0d1218; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label { font-size: 13px; color: var(--muted); }
+  input[type=number] { width: 72px; font: 13px var(--mono); padding: 6px 8px; background: #14181d;
+                       color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  .readout { font: 13px/1.7 var(--mono); color: var(--fg); white-space: pre-wrap; margin-top: 12px; }
+  .readout b { color: var(--ok); } .readout s { color: var(--bad); text-decoration: none; }
+  #stage { position: fixed; inset: 0; background: #000; display: none; z-index: 50; }
+  #stage.on { display: block; }
+  #stageImg { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  .dot { position: fixed; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+         border: 2px solid var(--human); z-index: 60; display: none; }
+  .dot.on { display: block; }
+  .target { position: fixed; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+            background: var(--dog); border: 2px solid #fff; cursor: pointer; z-index: 61; }
+  .target .n { position: absolute; inset: 0; display: grid; place-items: center;
+               font: 600 11px var(--mono); color: #0d1218; }
+  .target[data-left="0"] { background: var(--ok); }
+  canvas { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  .caveat { border-left: 2px solid var(--dog); padding-left: 12px; }
+  .caveat p:last-child { margin-bottom: 0; }
+  code { font: 12px var(--mono); color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>摄像头眼动可行性测试</h1>
+    <p>用 WebGazer 跑一遍完整流程：校准 → 验证 → 看一张真实刺激图。做完会给你一个<b>以度为单位的误差</b>，
+       拿它去对照 A 字立牌在屏上的尺寸，就知道够不够用。整个过程只在你自己的浏览器里，画面不上传。</p>
+  </header>
+
+  <section class="step" id="s1">
+    <span class="num">01 / 设置</span>
+    <h2>打开摄像头</h2>
+    <p>坐正，屏幕对着脸，光线别从背后来。开始后右下角会出现预览窗，看得到自己的脸就对了。</p>
+    <div class="row">
+      <button class="primary" id="btnStart">启动摄像头</button>
+      <label>观看距离 <input type="number" id="dist" value="60" min="30" max="120" step="5"> cm</label>
+      <label>刺激 <select id="pick" style="font:13px var(--sans);padding:6px;background:#14181d;color:var(--fg);border:1px solid var(--line);border-radius:6px">
+        <option value="stimuli/v06_t1104_human.jpg">v06 Starbucks · 人 1.6 m</option>
+        <option value="stimuli/v06_t1104_dog.jpg">v06 Starbucks · 狗 0.45 m</option>
+        <option value="stimuli/m03_louvre-bench_human.jpg">m03 海报 · 人 1.6 m</option>
+        <option value="stimuli/m03_louvre-bench_dog.jpg">m03 海报 · 狗 0.45 m</option>
+      </select></label>
+    </div>
+    <div class="readout" id="out1"></div>
+  </section>
+
+  <section class="step" id="s2">
+    <span class="num">02 / 校准</span>
+    <h2>盯着每个点，点它 5 下</h2>
+    <p>9 个橙点。<b>眼睛盯着点</b>，鼠标点它 5 次，点满变绿。头别动。这一步偷工减料，后面的误差会很难看。</p>
+    <div class="row"><button id="btnCal" disabled>开始校准</button><button id="btnCalDone" disabled>校准完了</button></div>
+    <div class="readout" id="out2"></div>
+  </section>
+
+  <section class="step" id="s3">
+    <span class="num">03 / 验证</span>
+    <h2>量一下到底差多少</h2>
+    <p>5 个<b>没参与校准</b>的新点，每个盯 1.5 秒，不用点。这才是真实精度——拿校准点自己验自己是作弊。</p>
+    <p><b>验完别停。</b>往后靠 20 cm，或者侧身一点，再验一次。两次的差就是这套方法最要命的那个弱点：
+       它学的是「这个头位下，这种眼睛图像对应屏幕哪里」，头一动，映射就不作数了。</p>
+    <div class="row"><button id="btnVal" disabled>开始验证</button></div>
+    <div class="readout" id="out3"></div>
+  </section>
+
+  <section class="step" id="s4">
+    <span class="num">04 / 试次</span>
+    <h2>看一张真实刺激图</h2>
+    <p>图全屏 6 秒，当作你在找路牌。结束后出注视热力图和 scanpath，叠在原图上。</p>
+    <div class="row"><button id="btnTrial" disabled>开始试次</button><button id="btnCsv" disabled>导出 CSV</button></div>
+    <div class="readout" id="out4"></div>
+    <canvas id="result" width="960" height="540" style="margin-top:14px;display:none"></canvas>
+  </section>
+
+  <section class="step caveat">
+    <span class="num">读结果的时候</span>
+    <p><b>1° 能换算成像素。</b>按你填的距离算：60 cm 处 1° ≈ 40 个 CSS 像素。误差 3° 就是 120 px。</p>
+    <p><b>拿它去比目标尺寸。</b>A 字立牌在 1920 宽的屏上大约 150–300 px。误差要是 120 px，
+       判断「看没看到牌子」就是掷硬币。</p>
+    <p><b>采样率同样要命。</b>下面会报实测 Hz。摄像头大概 25–30 Hz，也就是 33–40 ms 一个点；
+       H2 要测的首次注视延迟本身就在几百毫秒量级，这个分辨率测不动。</p>
+    <p><b>这是上限不是下限。</b>你坐得正、光线好、头不动，才有这个数。真被试会更差。</p>
+  </section>
+
+</div>
+
+<div id="dot" class="dot"></div>
+<div id="stage"><img id="stageImg" alt=""><canvas id="overlay"></canvas></div>
+
+<script src="https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var out1 = $("out1"), out2 = $("out2"), out3 = $("out3"), out4 = $("out4");
+
+  var gaze = null;          // latest {x,y}
+  var samples = [];         // trial samples
+  var recording = false;
+  var started = false;
+  var calTargets = [];
+
+  // CSS px per degree. A CSS px is 1/96 inch by definition, so 1 cm = 37.795 px.
+  // At distance d cm, one degree subtends d*tan(1deg) cm.
+  function pxPerDeg() {
+    var d = parseFloat($("dist").value) || 60;
+    return d * Math.tan(Math.PI / 180) * 37.795;
+  }
+
+  function say(el, html) { el.innerHTML = html; }
+
+  /* ---------- 01 camera ---------- */
+  $("btnStart").addEventListener("click", function () {
+    if (started) return;
+    if (typeof webgazer === "undefined") {
+      say(out1, "<s>WebGazer 没加载到。</s> 断网或者 CDN 被挡了，刷新重试。");
+      return;
+    }
+    started = true;
+    this.disabled = true;
+    say(out1, "正在启动…浏览器会问你要摄像头权限，点允许。");
+    webgazer.params.showVideoPreview = true;
+    webgazer.params.showFaceOverlay = true;
+    webgazer.params.showFaceFeedbackBox = true;
+    webgazer.setRegression("ridge")
+      .setGazeListener(function (data) {
+        if (!data) return;
+        gaze = { x: data.x, y: data.y };
+        var dot = $("dot");
+        dot.classList.add("on");
+        dot.style.left = data.x + "px";
+        dot.style.top = data.y + "px";
+        if (recording) samples.push({ t: performance.now(), x: data.x, y: data.y });
+      })
+      .begin()
+      .then(function () {
+        webgazer.showPredictionPoints(false);
+        say(out1, "<b>摄像头在跑了。</b> 蓝圈就是当前估计的注视点——现在它大概率不准，还没校准。");
+        $("btnCal").disabled = false;
+      })
+      .catch(function (e) {
+        started = false;
+        $("btnStart").disabled = false;
+        say(out1, "<s>启动失败：</s>" + (e && e.message ? e.message : e) +
+          "<br>多半是没给摄像头权限，或者页面不是从 localhost / https 打开的。");
+      });
+  });
+
+  /* ---------- 02 calibration ---------- */
+  var CAL = [[.1,.1],[.5,.1],[.9,.1],[.1,.5],[.5,.5],[.9,.5],[.1,.9],[.5,.9],[.9,.9]];
+  var NEED = 5;
+
+  $("btnCal").addEventListener("click", function () {
+    clearTargets();
+    this.disabled = true;
+    calTargets = CAL.map(function (p, i) {
+      var el = document.createElement("div");
+      el.className = "target";
+      el.dataset.left = NEED;
+      el.style.left = (p[0] * window.innerWidth) + "px";
+      el.style.top = (p[1] * window.innerHeight) + "px";
+      el.innerHTML = '<span class="n">' + NEED + "</span>";
+      el.addEventListener("click", function () {
+        var left = parseInt(el.dataset.left, 10) - 1;
+        el.dataset.left = left;
+        el.querySelector(".n").textContent = left > 0 ? left : "✓";
+        progress();
+      });
+      document.body.appendChild(el);
+      return el;
+    });
+    say(out2, "盯着橙点，点它 " + NEED + " 下。还剩 " + (CAL.length * NEED) + " 次。");
+    $("btnCalDone").disabled = false;
+  });
+
+  function progress() {
+    var left = calTargets.reduce(function (s, el) { return s + parseInt(el.dataset.left, 10); }, 0);
+    if (left > 0) {
+      say(out2, "还剩 " + left + " 次。");
+    } else {
+      say(out2, "<b>9 个点都点满了。</b> 可以去验证了。");
+      $("btnVal").disabled = false;
+      $("s2").dataset.done = "1";
+    }
+  }
+
+  $("btnCalDone").addEventListener("click", function () {
+    clearTargets();
+    this.disabled = true;
+    $("btnVal").disabled = false;
+    if (!$("s2").dataset.done) say(out2, "提前结束了。没点满的话误差会偏大，心里有数就行。");
+  });
+
+  function clearTargets() {
+    calTargets.forEach(function (el) { el.remove(); });
+    calTargets = [];
+  }
+
+  /* ---------- 03 validation ---------- */
+  var VAL = [[.25,.25],[.75,.25],[.5,.6],[.25,.75],[.75,.75]];
+
+  var valRuns = [];   // one entry per validation pass, so drift is measurable
+
+  $("btnVal").addEventListener("click", function () {
+    clearTargets();
+    this.disabled = true;
+    webgazer.showPredictionPoints(false);
+    var errs = [], rates = [];
+    var i = 0;
+
+    function next() {
+      if (i >= VAL.length) { finish(); return; }
+      var p = VAL[i];
+      var tx = p[0] * window.innerWidth, ty = p[1] * window.innerHeight;
+      var el = document.createElement("div");
+      el.className = "target";
+      el.style.left = tx + "px";
+      el.style.top = ty + "px";
+      el.innerHTML = '<span class="n">' + (i + 1) + "</span>";
+      document.body.appendChild(el);
+      calTargets.push(el);
+      say(out3, "盯住第 " + (i + 1) + " / " + VAL.length + " 个点…");
+
+      var pts = [], t0 = performance.now();
+      var timer = setInterval(function () {
+        if (gaze) pts.push({ x: gaze.x, y: gaze.y });
+      }, 10);
+      setTimeout(function () {
+        clearInterval(timer);
+        var secs = (performance.now() - t0) / 1000;
+        // drop the first third: the eye is still travelling to the new target
+        var use = pts.slice(Math.floor(pts.length / 3));
+        if (use.length) {
+          var ex = use.reduce(function (s, q) { return s + q.x; }, 0) / use.length;
+          var ey = use.reduce(function (s, q) { return s + q.y; }, 0) / use.length;
+          errs.push(Math.hypot(ex - tx, ey - ty));
+          rates.push(use.length / (secs * 2 / 3));   // samples/s seen by the 100 Hz poll
+        }
+        el.remove();
+        i += 1;
+        setTimeout(next, 250);
+      }, 1500);
+    }
+
+    function finish() {
+      clearTargets();
+      if (!errs.length) { say(out3, "<s>一个样本都没收到。</s> 摄像头可能停了。"); return; }
+      errs.sort(function (a, b) { return a - b; });
+      var med = errs[Math.floor(errs.length / 2)];
+      var ppd = pxPerDeg();
+      var deg = med / ppd;
+      var verdict = deg < 1.5
+        ? "<b>这个精度很好</b>，接近屏下式。少见，但说明你的条件很理想。"
+        : deg < 3
+          ? "<b>够做 dwell 占比</b>（H1），AOI 别切太细。测首次注视延迟还是不行。"
+          : "<s>只够看个大概方向。</s> 判断「看没看到某个牌子」会经常判错。";
+      valRuns.push(deg);
+      var hz = (rates.reduce(function (s, r) { return s + r; }, 0) / rates.length).toFixed(0);
+      var lines =
+        "第 " + valRuns.length + " 次：中位误差 <b>" + med.toFixed(0) + " px</b> = <b>" +
+        deg.toFixed(1) + "°</b>（按 " + $("dist").value + " cm，1° ≈ " + ppd.toFixed(0) + " px）<br>" +
+        "五个点分别：" + errs.map(function (e) { return (e / ppd).toFixed(1) + "°"; }).join("  ") + "<br>" +
+        "实测采样率约 <b>" + hz + " Hz</b>（屏下式 30–133，Neon 200）<br><br>" + verdict;
+
+      if (valRuns.length > 1) {
+        var first = valRuns[0], drift = deg - first;
+        lines += "<br><br>和第一次比：" + first.toFixed(1) + "° → " + deg.toFixed(1) + "°，" +
+          (Math.abs(drift) < 0.5
+            ? "基本没变——说明你这次头位和校准时差不多。"
+            : "<s>" + (drift > 0 ? "差了 +" : "好了 ") + drift.toFixed(1) +
+              "°</s>。没重新校准，变的只有头位，这就是答案：" +
+              "<b>映射是绑在校准时那个头位上的</b>。") +
+          "<br>往后的每次验证会接着往下列。";
+      } else {
+        lines += "<br><br><b>现在动一下再验一次。</b>往后靠 20 cm，或者坐偏一点，别重新校准，直接再点「开始验证」。";
+      }
+      say(out3, lines);
+      $("s3").dataset.done = "1";
+      $("btnTrial").disabled = false;
+      $("btnVal").disabled = false;
+      $("btnVal").textContent = "再验一次（动了之后）";
+    }
+    next();
+  });
+
+  /* ---------- 04 trial ---------- */
+  $("btnTrial").addEventListener("click", function () {
+    this.disabled = true;
+    var src = $("pick").value;
+    var img = $("stageImg");
+    img.onload = function () {
+      $("stage").classList.add("on");
+      $("dot").classList.remove("on");
+      samples = [];
+      recording = true;
+      say(out4, "试次进行中…");
+      setTimeout(function () {
+        recording = false;
+        $("stage").classList.remove("on");
+        $("dot").classList.add("on");
+        draw(img);
+        $("btnTrial").disabled = false;
+        $("btnCsv").disabled = samples.length === 0;
+      }, 6000);
+    };
+    img.onerror = function () {
+      say(out4, "<s>图没加载到：</s>" + src + "<br>这个页面要从 localhost 打开，不能直接双击打开文件。");
+      $("btnTrial").disabled = false;
+    };
+    img.src = src;
+  });
+
+  function draw(img) {
+    var c = $("result"), g = c.getContext("2d");
+    var box = img.getBoundingClientRect();
+    c.style.display = "block";
+    c.width = 960;
+    c.height = Math.round(960 * box.height / box.width);
+    var sx = c.width / box.width, sy = c.height / box.height;
+    g.drawImage(img, 0, 0, c.width, c.height);
+    g.fillStyle = "rgba(0,0,0,.45)";
+    g.fillRect(0, 0, c.width, c.height);
+
+    var pts = samples.map(function (s) {
+      return { t: s.t, x: (s.x - box.left) * sx, y: (s.y - box.top) * sy };
+    }).filter(function (p) { return p.x >= 0 && p.y >= 0 && p.x <= c.width && p.y <= c.height; });
+
+    // heat: additive soft blobs
+    g.globalCompositeOperation = "lighter";
+    pts.forEach(function (p) {
+      var r = 44;
+      var grad = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grad.addColorStop(0, "rgba(224,138,78,.16)");
+      grad.addColorStop(1, "rgba(224,138,78,0)");
+      g.fillStyle = grad;
+      g.beginPath(); g.arc(p.x, p.y, r, 0, 6.2832); g.fill();
+    });
+    g.globalCompositeOperation = "source-over";
+
+    // scanpath
+    g.strokeStyle = "rgba(107,163,221,.85)";
+    g.lineWidth = 1.4;
+    g.beginPath();
+    pts.forEach(function (p, i) { i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); });
+    g.stroke();
+    if (pts.length) {
+      g.fillStyle = "#6cc08a";
+      g.beginPath(); g.arc(pts[0].x, pts[0].y, 5, 0, 6.2832); g.fill();
+      g.fillStyle = "#e06c6c";
+      var last = pts[pts.length - 1];
+      g.beginPath(); g.arc(last.x, last.y, 5, 0, 6.2832); g.fill();
+    }
+
+    var dur = samples.length ? (samples[samples.length - 1].t - samples[0].t) / 1000 : 0;
+    say(out4, "收到 <b>" + samples.length + "</b> 个样本，" + dur.toFixed(1) + " 秒，约 <b>" +
+      (dur ? (samples.length / dur).toFixed(0) : 0) + " Hz</b>。" +
+      "落在图内 " + pts.length + " 个。<br>绿点是起点，红点是终点。" +
+      "<br><br>看一眼：轨迹有没有落到你自己记得在看的那个东西上？没有的话，问题不在你，在精度。");
+  }
+
+  $("btnCsv").addEventListener("click", function () {
+    var t0 = samples.length ? samples[0].t : 0;
+    var rows = ["t_ms,x_px,y_px"].concat(samples.map(function (s) {
+      return (s.t - t0).toFixed(1) + "," + s.x.toFixed(1) + "," + s.y.toFixed(1);
+    }));
+    var url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
+    var a = document.createElement("a");
+    a.href = url; a.download = "webgaze_trial.csv"; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+
+  window.addEventListener("beforeunload", function () {
+    try { webgazer.end(); } catch (e) { /* not started */ }
+  });
+})();
+</script>
+</body>
+</html>

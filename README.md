@@ -7,7 +7,10 @@ eye height, one on a harness on the dog's back — and a separate eye-tracking
 session put one person in front of photographs taken from both heights. This
 repository holds the analysis of both, and a site that plays the results back.
 
-**→ [The visualisations](https://emmaruyiyang.github.io/pet-vision/)**
+**→ [The visualisations](https://www.ruyiyang.com/pet-vision/)**
+
+<sub>Served by GitHub Pages from <code>docs/</code> on <code>main</code>. The account's custom
+domain means <code>emmaruyiyang.github.io/pet-vision/</code> redirects here.</sub>
 
 | | |
 | --- | --- |
